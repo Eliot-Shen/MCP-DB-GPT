@@ -1,12 +1,8 @@
 import os
 from openai import OpenAI
-from dotenv import load_dotenv
 
 class TongYiAPI:
     def __init__(self):
-        # 加载环境变量
-        load_dotenv()
-        
         # 使用阿里云通义千问的配置
         self.model = os.getenv("model_name", "qwen-plus")  # 默认使用qwen-plus模型
         self.api_key = os.getenv("api_key")  # 使用阿里云API Key

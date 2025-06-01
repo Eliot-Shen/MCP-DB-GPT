@@ -264,6 +264,95 @@ def get_tables() -> Dict[str, Any]:
         conn.close()
 
 
+@mcp.resource("mysql://table/{table_name}/describe")
+def get_table_description(table_name: str) -> Dict[str, Any]:
+    """获取指定表的详细描述信息，以CREATE TABLE格式返回"""
+    conn = get_connection()
+    cursor = None
+    try:
+        # 创建字典游标
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # 检查表是否存在
+        cursor.execute("SHOW TABLES")
+        tables = cursor.fetchall()
+        table_names = [list(table.values())[0] for table in tables]
+        
+        if table_name not in table_names:
+            return {
+                "success": False,
+                "error": f"表 '{table_name}' 不存在"
+            }
+        
+        # 获取表结构
+        cursor.execute(f"DESCRIBE `{table_name}`")
+        columns = cursor.fetchall()
+        
+        # 获取表的索引信息
+        cursor.execute(f"SHOW INDEX FROM `{table_name}`")
+        indexes = cursor.fetchall()
+        
+        # 获取表的其他信息（如注释）
+        cursor.execute(f"SHOW TABLE STATUS LIKE '{table_name}'")
+        table_status = cursor.fetchone()
+        
+        # 构建列定义
+        column_definitions = []
+        for column in columns:
+            collation = ""
+            if "char" in column["Type"].lower() or "text" in column["Type"].lower():
+                collation = ' COLLATE "UTF8MB4_0900_AI_CI"'
+            
+            definition = f'    "{column["Field"]}" {column["Type"].upper()}{collation}'
+            column_definitions.append(definition)
+        
+        # 构建索引定义
+        index_definitions = []
+        current_index = None
+        current_columns = []
+        
+        for idx in indexes:
+            if current_index != idx["Key_name"]:
+                if current_index and current_columns:
+                    if current_index == "PRIMARY":
+                        index_str = f'Primary key({", ".join(current_columns)})'
+                    else:
+                        index_str = f'Index {current_index}(`{", ".join(current_columns)}`)'
+                    index_definitions.append(index_str)
+                current_index = idx["Key_name"]
+                current_columns = []
+            current_columns.append(idx["Column_name"])
+        
+        # 处理最后一个索引
+        if current_index and current_columns:
+            if current_index == "PRIMARY":
+                index_str = f'Primary key({", ".join(current_columns)})'
+            else:
+                index_str = f'Index {current_index}(`{", ".join(current_columns)}`)'
+            index_definitions.append(index_str)
+        
+        # 构建完整的表定义
+        table_definition = f'CREATE TABLE `{table_name}`\n(\n'
+        table_definition += ',\n'.join(column_definitions)
+        table_definition += f'\n) COMMENT "{table_status["Comment"] or "None"}"'
+        if index_definitions:
+            table_definition += '\n' + '\n'.join(index_definitions)
+            
+        return {
+            "success": True,
+            "table_definition": table_definition
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    finally:
+        if cursor:
+            cursor.close()
+        conn.close()
+
+
 def validate_config():
     """Validate database configuration"""
     required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]

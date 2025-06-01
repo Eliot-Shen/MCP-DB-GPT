@@ -46,9 +46,6 @@ DB_GPT_SYSTEM_PROMPT = """
         response_heatmap: Suitable for visual analysis of time series data, large-scale data sets, distribution of classified data, etc.
         response_vector_chart: Suitable for projecting high-dimensional vector data onto a two-dimensional plot through the PCA algorithm.
 
-用户问题:
-    {user_question}
-
 请一步步思考并按照以下JSON格式回复：
 {{
     "thoughts": "thoughts summary to say to user",

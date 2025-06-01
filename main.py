@@ -1,3 +1,9 @@
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+
 def main():
     print("Hello from my-db-gpt!")
 

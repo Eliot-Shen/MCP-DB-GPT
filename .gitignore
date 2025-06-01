@@ -12,3 +12,4 @@ wheels/
 .python-version
 .vscode
 mcp_mysql_server/README.md
+.env
