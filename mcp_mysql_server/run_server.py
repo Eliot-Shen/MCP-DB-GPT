@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import pymysql
 import pymysql.cursors
 from mcp.server.fastmcp import FastMCP
+import re
 
 # Load environment variables
 load_dotenv()
@@ -80,6 +81,28 @@ def get_schema() -> Dict[str, Any]:
         conn.close()
 
 
+def get_sensitive_fields() -> list:
+    """
+    从环境变量获取敏感字段列表
+    默认包含基础敏感字段，可通过环境变量SENSITIVE_FIELDS扩展
+    """
+    default_fields = [
+        'password', 'pwd', 'passwd',
+        'salary', 'income',
+        'ssn', 'social_security',
+        'credit_card', 'bank_account',
+        'id_number', 'idcard',
+        'phone', 'mobile',
+        'address', 'email'
+    ]
+    
+    # 从环境变量获取额外的敏感字段
+    env_fields = os.environ.get('SENSITIVE_FIELDS', '').split(';')
+    env_fields = [field.strip().lower() for field in env_fields if field.strip()]
+    
+    return env_fields
+
+
 def is_safe_query(sql: str) -> bool:
     """
     严格检查SQL查询安全性
@@ -87,6 +110,8 @@ def is_safe_query(sql: str) -> bool:
     支持的格式：
     - SELECT ...
     - WITH ... SELECT ...
+    
+    同时检查是否包含敏感字段
     """
     # 移除多余的空白字符并转换为小写
     sql = ' '.join(sql.split()).lower()
@@ -102,7 +127,76 @@ def is_safe_query(sql: str) -> bool:
     # 检查是否包含危险关键字
     unsafe_keywords = ["insert", "update", "delete", "drop", "alter", "truncate", "create"]
     # 检查整个查询中是否包含危险关键字（可能在子查询中）
-    return not any(f" {keyword} " in f" {sql} " for keyword in unsafe_keywords)
+    if any(f" {keyword} " in f" {sql} " for keyword in unsafe_keywords):
+        return False
+        
+    # 获取敏感字段列表
+    sensitive_fields = get_sensitive_fields()
+    
+    # 快速检查：如果SQL中包含完整的敏感字段名（考虑单词边界），直接返回False
+    for field in sensitive_fields:
+        pattern = fr'\b{field}\b'
+        if re.search(pattern, sql):
+            return False
+    
+    try:
+        # 移除SQL注释
+        sql = re.sub(r'--.*$', '', sql, flags=re.MULTILINE)
+        sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+        
+        # 获取select和from之间的内容
+        select_pattern = r'select\s+(.*?)\s+from'
+        matches = re.findall(select_pattern, sql, re.IGNORECASE)
+        
+        if matches:
+            selected_fields = matches[0].split(',')
+            selected_fields = [f.strip().lower() for f in selected_fields]
+            
+            # 检查每个字段是否是敏感字段
+            for field in selected_fields:
+                # 处理别名情况 (例如: password as pwd)
+                field = field.split(' as ')[0].strip()
+                # 处理表前缀情况 (例如: user.password)
+                field = field.split('.')[-1].strip()
+                
+                # 如果是SELECT *，获取表名并检查表结构
+                if field == '*':
+                    # 提取表名
+                    table_pattern = r'from\s+([^\s;]+)'
+                    table_match = re.search(table_pattern, sql)
+                    if table_match:
+                        table_name = table_match.group(1).strip('`')
+                        # 获取数据库连接
+                        conn = get_connection()
+                        try:
+                            cursor = conn.cursor()
+                            # 获取表的所有字段
+                            cursor.execute(f"DESCRIBE `{table_name}`")
+                            columns = cursor.fetchall()
+                            # 检查是否包含敏感字段
+                            for column in columns:
+                                field_name = column[0].lower()
+                                if field_name in sensitive_fields:
+                                    return False
+                        finally:
+                            cursor.close()
+                            conn.close()
+                    continue
+                    
+                # 检查字段名是否完全匹配敏感字段
+                if field in sensitive_fields:
+                    return False
+                    
+                # 检查字段是否包含在函数调用中
+                for sensitive in sensitive_fields:
+                    if f"({sensitive}" in field or f",{sensitive}" in field:
+                        return False
+    except Exception as e:
+        # 如果解析失败，为安全起见返回False
+        logger.warning(f"Query parsing failed: {str(e)}")
+        return False
+        
+    return True
 
 
 @mcp.tool()
@@ -111,7 +205,7 @@ def query_data(sql: str) -> Dict[str, Any]:
     if not is_safe_query(sql):
         return {
             "success": False,
-            "error": "Potentially unsafe query detected. Only SELECT queries are allowed."
+            "error": "Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
         }
     logger.info(f"Executing query: {sql}")
     conn = get_connection()
@@ -187,3 +281,5 @@ def main():
 
 if __name__ == "__main__":
     mcp.run(transport='stdio')
+    # sql = "select salary from employee limit 3;"
+    # print(is_safe_query(sql))
