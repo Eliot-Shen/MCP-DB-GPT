@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional, List
 import os 
 import logging
 from dotenv import load_dotenv
@@ -6,6 +6,7 @@ import pymysql
 import pymysql.cursors
 from mcp.server.fastmcp import FastMCP
 import re
+import time
 
 # Load environment variables
 load_dotenv()
@@ -22,12 +23,59 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", 3306))
 }
 
+# Global query log storage
+query_logs = []  # List of all query logs
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("mysql-mcp-server")
 
+def log_query(operation: str, success: bool, error: str = None):
+    """
+    记录查询日志（不区分客户端）
+    """
+    log_entry = {
+        "timestamp": time.time(),
+        "operation": operation,
+        "success": success,
+        "error_msg": error
+    }
+    
+    # 添加到全局日志列表
+    query_logs.append(log_entry)
+
+@mcp.tool()
+def get_query_logs(limit: int = 5) -> Dict[str, Any]:
+    """获取查询日志
+    
+    Args:
+        limit: 可选参数，指定返回的日志数量，默认为20
+    """
+    # 验证limit参数
+    if limit <= 0:
+        return {
+            "success": False,
+            "error": "Limit must be a positive integer"
+        }
+    
+    # 获取最近的日志
+    logs = query_logs[-limit:] if limit < len(query_logs) else query_logs
+    
+    # 转换时间戳为可读格式
+    formatted_logs = []
+    for log in logs:
+        formatted_log = log.copy()
+        formatted_log["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S", 
+                              time.localtime(log["timestamp"]))
+        formatted_logs.append(formatted_log)
+    
+    return {
+        "success": True,
+        "logs": formatted_logs,
+        "total_queries": len(query_logs)
+    }
 
 # Connect to MySQL database
 def get_connection():
@@ -38,9 +86,13 @@ def get_connection():
         raise
 
 
-@mcp.resource("mysql://schema")
-def get_schema() -> Dict[str, Any]:
-    """Provide database table structure information"""
+@mcp.tool()
+def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
+    """获取数据库表结构信息，支持按表名过滤
+    
+    Args:
+        table_names: 可选参数，指定要获取的表名列表。如果为None则返回所有表
+    """
     conn = get_connection()
     cursor = None
     try:
@@ -50,11 +102,24 @@ def get_schema() -> Dict[str, Any]:
         # Get all table names
         cursor.execute("SHOW TABLES")
         tables = cursor.fetchall()
-        table_names = [list(table.values())[0] for table in tables]
+        all_table_names = [list(table.values())[0] for table in tables]
+        
+        # Filter tables if table_names is provided
+        if table_names is not None:
+            # 确保请求的表名都存在
+            valid_tables = [name for name in table_names if name in all_table_names]
+            if not valid_tables:
+                return {
+                    "success": False,
+                    "error": "None of the specified tables exist in the database"
+                }
+            table_names_to_query = valid_tables
+        else:
+            table_names_to_query = all_table_names
         
         # Get structure for each table
         schema = {}
-        for table_name in table_names:
+        for table_name in table_names_to_query:
             cursor.execute(f"DESCRIBE `{table_name}`")
             columns = cursor.fetchall()
             table_schema = []
@@ -70,10 +135,22 @@ def get_schema() -> Dict[str, Any]:
                 })
             
             schema[table_name] = table_schema
-        
+
+        # 记录成功日志
+        log_query(operation=f"get_schema for tables: {table_names_to_query}", success=True)
+
         return {
+            "success": True,
             "database": DB_CONFIG["db"],
             "tables": schema
+        }
+    except Exception as e:
+        # 记录失败日志
+        log_query(operation="get_schema", success=False, error=str(e))
+        logger.error(f"Failed to retrieve schema: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
         }
     finally:
         if cursor:
@@ -205,7 +282,7 @@ def is_sql_injection(query: str) -> bool:
     """
     # 常见SQL注入关键词
     injection_keywords = [
-        "'", '"', ';', '--', '/*', '*/', 'xp_', 'exec', 'sp_',
+        "'", '"', '--', '/*', '*/', 'xp_', 'exec', 'sp_',
         'union select', 'drop table', 'truncate table',
         'insert into', 'update set', 'delete from', 'alter table',
         'create table', 'shutdown', 'waitfor delay'
@@ -230,14 +307,18 @@ def is_sql_injection(query: str) -> bool:
 def query_data(sql: str) -> Dict[str, Any]:
     """Execute read-only SQL queries"""
     if not is_safe_query(sql):
+        error_msg = "Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
+        log_query(operation=sql, success=False, error=error_msg)
         return {
             "success": False,
-            "error": "Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
+            "error": error_msg
         }
     if is_sql_injection(sql):
+        error_msg = "Potentially SQL injection detected!"
+        log_query(operation=sql, success=False, error=error_msg)
         return {
             "success": False,
-            "error": "Potentially SQL injection detected !"
+            "error": error_msg
         }
     logger.info(f"Executing query: {sql}")
     conn = get_connection()
@@ -254,6 +335,9 @@ def query_data(sql: str) -> Dict[str, Any]:
             cursor.execute(sql)
             results = cursor.fetchall()
             conn.commit()
+
+            # 记录成功查询
+            log_query(operation=sql, success=True)
             
             # Convert results to serializable format
             return {
@@ -263,6 +347,8 @@ def query_data(sql: str) -> Dict[str, Any]:
             }
         except Exception as e:
             conn.rollback()
+            error_msg = str(e)
+            log_query(operation=sql, success=False, error=error_msg)
             return {
                 "success": False,
                 "error": str(e)

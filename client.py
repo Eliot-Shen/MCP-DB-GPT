@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional
+from typing import Optional, List
 from contextlib import AsyncExitStack
 import json
 
@@ -24,6 +24,20 @@ def print_banner():
     print('#'*65)
     print(banner)
     print('#'*65)
+
+def print_help():
+    """Print help message"""
+    print("\n=== 使用说明 ===")
+    print("支持的命令：")
+    print("1. schema 表名1 表名2 - 显示数据库结构，可指定表名，默认返回所有表结构")
+    print("2. sql <SQL语句> - 直接执行SQL查询（如：sql SELECT * FROM users）")
+    print("3. log [数量] - 显示该会话最近的查询日志，可指定数量（默认5条）")
+    print("4. 自然语言查询 - 用中文描述你的需求（如：显示所有用户信息）")
+    print("5. quit - 退出程序")
+    print("6. help - 显示帮助信息")
+    print("\n注意：")
+    print("- 使用'sql'命令时会直接执行SQL，不经过LLM处理，sql语句不用加;结尾")
+    print("- 自然语言查询会通过LLM处理，返回结果包含SQL和查询结果")
 
 class MCPClient:
     def __init__(self):
@@ -68,6 +82,78 @@ class MCPClient:
             print("Available resources:", [resource.uri for resource in resources_response.resources])
         else:
             print("No available resources found.")
+
+    async def get_query_logs(self, limit: int = 5) -> str:
+        """获取查询日志"""
+        try:
+            logs_response = await self.session.call_tool("get_query_logs", {"limit": limit})
+            if not logs_response or not logs_response.content:
+                return "无法获取查询日志"
+            
+            logs_info = json.loads(logs_response.content[0].text)
+            if not logs_info.get("success"):
+                return f"获取日志失败: {logs_info.get('error', '未知错误')}"
+            
+            logs = logs_info.get("logs", [])
+            total_queries = logs_info.get("total_queries", 0)
+            
+            if not logs:
+                return "没有查询日志记录"
+            
+            result = []
+            result.append(f"\n最近的{len(logs)}条查询日志:")
+            for log in logs:
+                result.append(f"\n时间: {log['timestamp']}")
+                result.append(f"操作: {log['operation']}")
+                result.append(f"状态: {'成功' if log['success'] else '失败'}")
+                if not log['success'] and log.get('error'):
+                    result.append(f"错误信息: {log['error']}")
+                result.append("-" * 40)
+            
+            return "\n".join(result)
+        except Exception as e:
+            return f"获取查询日志时出错: {str(e)}"
+    
+    async def get_schema(self, table_names: Optional[List[str]] = None) -> str:
+        """获取数据库结构信息"""
+        try:
+            params = {}
+            if table_names:
+                params["table_names"] = table_names
+                
+            schema_response = await self.session.call_tool("get_schema", params)
+            if not schema_response or not schema_response.content:
+                return "无法获取数据库结构信息"
+            
+            schema_info = json.loads(schema_response.content[0].text)
+            if not schema_info.get("success"):
+                return f"获取数据库结构失败: {schema_info.get('error', '未知错误')}"
+            
+            database_name = schema_info["database"]
+            tables_schema = schema_info["tables"]
+            
+            result = []
+            result.append(f"数据库名: {database_name}")
+            result.append("\n---表结构---")
+            
+            # 显示每个表的结构
+            for table_name, columns in tables_schema.items():
+                result.append(f"\n表名: {table_name}")
+                result.append("列信息:")
+                for column in columns:
+                    result.append(f"  - {column['name']} ({column['type']})")
+                    if column['key'] == 'PRI':
+                        result.append("    主键")
+                    if column['null'] == 'NO':
+                        result.append("    非空")
+                    if column['default']:
+                        result.append(f"    默认值: {column['default']}")
+                    if column['extra']:
+                        result.append(f"    额外信息: {column['extra']}")
+            
+            return "\n".join(result)
+        except Exception as e:
+            return f"获取数据库结构时出错: {str(e)}"
 
     async def process_query(self, query: str) -> str:
         """使用通义千问处理数据库相关查询"""
@@ -127,19 +213,11 @@ class MCPClient:
 
         except Exception as e:
             return f"处理查询时出错: {str(e)}"
-    
+
     async def chat_loop(self):
         """Run an interactive chat loop"""
         print("\nMCP Client Started!")
-        print("\n=== 使用说明 ===")
-        print("支持的命令：")
-        print("1. schema - 显示数据库结构")
-        print("2. sql <SQL语句> - 直接执行SQL查询（如：sql SELECT * FROM users）")
-        print("3. 自然语言查询 - 用中文描述你的需求（如：显示所有用户信息）")
-        print("4. quit - 退出程序")
-        print("\n注意：")
-        print("- 使用'sql'命令时会直接执行SQL，不经过LLM处理，sql语句不用加;结尾")
-        print("- 自然语言查询会通过LLM处理，返回结果包含SQL和查询结果")
+        print_help()
 
         while True:
             try:
@@ -147,6 +225,10 @@ class MCPClient:
 
                 if query.lower() == 'quit':
                     break
+
+                if query.lower() == 'help':
+                    print_help()
+                    continue
                 
                 # 处理直接SQL查询命令
                 if query.lower().startswith('sql '):
@@ -178,34 +260,31 @@ class MCPClient:
                         print(f"\n执行SQL查询时出错: {str(e)}")
                     continue
                     
-                if query.lower() == 'schema':
-                    # 直接使用mysql://schema接口获取数据库结构
-                    schema_response = await self.session.read_resource("mysql://schema")
-                    if not schema_response or not schema_response.contents:
-                        print("\n无法获取数据库结构信息")
-                        continue
+                # 处理schema命令
+                if query.lower().startswith('schema'):
+                    # 解析表名参数 - 支持简单空格分隔格式
+                    parts = query.split()
+                    table_names = None
+                    if len(parts) > 1:
+                        # 直接取第一个空格后的所有部分作为表名列表
+                        table_names = parts[1:]
+                    response = await self.get_schema(table_names)
+                    print(f"\n{response}")
+                    continue
+                
+                # 处理log命令
+                if query.lower().startswith('log'):
+                    limit = 5
+                    parts = query.split()
+                    if len(parts) > 1:
+                        try:
+                            limit = int(parts[1])
+                        except ValueError:
+                            print("\n请输入有效的日志数量")
+                            continue
                     
-                    schema_info = json.loads(schema_response.contents[0].text)
-                    database_name = schema_info["database"]
-                    tables_schema = schema_info["tables"]
-                    
-                    print(f"\n数据库名: {database_name}")
-                    print("\n表结构:")
-                    
-                    # 显示每个表的结构
-                    for table_name, columns in tables_schema.items():
-                        print(f"\n表名: {table_name}")
-                        print("列信息:")
-                        for column in columns:
-                            print(f"  - {column['name']} ({column['type']})")
-                            if column['key'] == 'PRI':
-                                print("    主键")
-                            if column['null'] == 'NO':
-                                print("    非空")
-                            if column['default']:
-                                print(f"    默认值: {column['default']}")
-                            if column['extra']:
-                                print(f"    额外信息: {column['extra']}")
+                    response = await self.get_query_logs(limit)
+                    print(f"\n{response}")
                     continue
 
                 # 处理SQL或自然语言查询
