@@ -198,6 +198,33 @@ def is_safe_query(sql: str) -> bool:
         
     return True
 
+def is_sql_injection(query: str) -> bool:
+    """
+    检查SQL注入的可能性
+    仅检查是否包含敏感关键字
+    """
+    # 常见SQL注入关键词
+    injection_keywords = [
+        "'", '"', ';', '--', '/*', '*/', 'xp_', 'exec', 'sp_',
+        'union select', 'drop table', 'truncate table',
+        'insert into', 'update set', 'delete from', 'alter table',
+        'create table', 'shutdown', 'waitfor delay'
+    ]
+    
+    # 检查查询中是否包含注入关键词
+    query_lower = query.lower()
+    for keyword in injection_keywords:
+        if keyword in query_lower:
+            return True
+            
+    # 检查是否有可疑的字符串拼接模式
+    if re.search(r'\b(and|or)\b\s+\d+\s*=\s*\d+', query_lower):
+        return True
+        
+    if re.search(r'\b(and|or)\b\s+\w+\s*=\s*\w+\s*--', query_lower):
+        return True
+        
+    return False
 
 @mcp.tool()
 def query_data(sql: str) -> Dict[str, Any]:
@@ -206,6 +233,11 @@ def query_data(sql: str) -> Dict[str, Any]:
         return {
             "success": False,
             "error": "Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
+        }
+    if is_sql_injection(sql):
+        return {
+            "success": False,
+            "error": "Potentially SQL injection detected !"
         }
     logger.info(f"Executing query: {sql}")
     conn = get_connection()
@@ -370,5 +402,6 @@ def main():
 
 if __name__ == "__main__":
     mcp.run(transport='stdio')
-    # sql = "select salary from employee limit 3;"
-    # print(is_safe_query(sql))
+    # mcp dev run_server.py
+    # sql = "select salary from employee limit 3"
+    # print(is_sql_injection(sql))
