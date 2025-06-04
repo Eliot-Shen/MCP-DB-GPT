@@ -4,7 +4,6 @@ from contextlib import AsyncExitStack
 import json
 
 from LLM.api import TongYiAPI
-from LLM.prompt_template import DB_GPT_SYSTEM_PROMPT
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -82,15 +81,23 @@ class MCPClient:
             print("Available resources:", [resource.uri for resource in resources_response.resources])
         else:
             print("No available resources found.")
+        
+        prompts = await self.session.list_prompts()
+        if prompts and prompts.prompts:
+            print("Available prompts:", [prompt.name for prompt in prompts.prompts])
+        else:
+            print("No available prompts found.")
 
     async def get_query_logs(self, limit: int = 5) -> str:
         """获取查询日志"""
         try:
-            logs_response = await self.session.call_tool("get_query_logs", {"limit": limit})
-            if not logs_response or not logs_response.content:
+            # logs_response = await self.session.call_tool("get_query_logs", {"limit": limit})
+            logs_response = await self.session.read_resource(f"logs://{limit}")
+            
+            if not logs_response or not logs_response.contents:
                 return "无法获取查询日志"
             
-            logs_info = json.loads(logs_response.content[0].text)
+            logs_info = json.loads(logs_response.contents[0].text)
             if not logs_info.get("success"):
                 return f"获取日志失败: {logs_info.get('error', '未知错误')}"
             
@@ -158,36 +165,10 @@ class MCPClient:
     async def process_query(self, query: str) -> str:
         """使用通义千问处理数据库相关查询"""
         try:
-            # 获取数据库表列表
-            tables_response = await self.session.read_resource("mysql://tables")
-            if not tables_response or not tables_response.contents:
-                return "无法获取数据库表信息"
-            
-            tables_info = json.loads(tables_response.contents[0].text)
-            database_name = tables_info["database"]
-            tables = tables_info["tables"]
-            
-            # 获取所有表的描述信息
-            table_definitions = []
-            for table in tables:
-                desc_response = await self.session.read_resource(f"mysql://table/{table}/describe")
-                if desc_response and desc_response.contents:
-                    table_desc = json.loads(desc_response.contents[0].text)
-                    if table_desc.get("success"):
-                        table_definitions.append(table_desc["table_definition"])
-            
-            # 填充模板
-            prompt = DB_GPT_SYSTEM_PROMPT.format(
-                database_name=database_name,
-                table_definitions="\n".join(table_definitions),
-            )
-            
-            # 调用通义千问API
+            prompt = await self.session.get_prompt("generate_db_gpt_prompt")
+            prompt = prompt.messages[0].content.text
             llm_response = self.llm.chat(prompt, query, response_format="json_object")
-            
-            # 解析LLM响应
             response_data = json.loads(llm_response)
-            
             # 如果有直接响应，直接返回
             if response_data.get("direct_response"):
                 return response_data["direct_response"]

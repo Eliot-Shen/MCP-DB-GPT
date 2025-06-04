@@ -7,6 +7,8 @@ import pymysql.cursors
 from mcp.server.fastmcp import FastMCP
 import re
 import time
+import json
+from prompt_template import DB_GPT_SYSTEM_PROMPT
 
 # Load environment variables
 load_dotenv()
@@ -46,13 +48,14 @@ def log_query(operation: str, success: bool, error: str = None):
     # 添加到全局日志列表
     query_logs.append(log_entry)
 
-@mcp.tool()
-def get_query_logs(limit: int = 5) -> Dict[str, Any]:
+@mcp.resource("logs://{limit}")
+def get_query_logs(limit: str = "5") -> Dict[str, Any]:
     """获取查询日志
     
     Args:
         limit: 可选参数，指定返回的日志数量，默认为20
     """
+    limit = int(limit)
     # 验证limit参数
     if limit <= 0:
         return {
@@ -77,6 +80,37 @@ def get_query_logs(limit: int = 5) -> Dict[str, Any]:
         "total_queries": len(query_logs)
     }
 
+# @mcp.tool()
+# def get_query_logs(limit: int = 5) -> Dict[str, Any]:
+#     """获取查询日志
+    
+#     Args:
+#         limit: 可选参数，指定返回的日志数量，默认为20
+#     """
+#     # 验证limit参数
+#     if limit <= 0:
+#         return {
+#             "success": False,
+#             "error": "Limit must be a positive integer"
+#         }
+    
+#     # 获取最近的日志
+#     logs = query_logs[-limit:] if limit < len(query_logs) else query_logs
+    
+#     # 转换时间戳为可读格式
+#     formatted_logs = []
+#     for log in logs:
+#         formatted_log = log.copy()
+#         formatted_log["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S", 
+#                               time.localtime(log["timestamp"]))
+#         formatted_logs.append(formatted_log)
+    
+#     return {
+#         "success": True,
+#         "logs": formatted_logs,
+#         "total_queries": len(query_logs)
+#     }
+
 # Connect to MySQL database
 def get_connection():
     try:
@@ -84,7 +118,6 @@ def get_connection():
     except pymysql.Error as e:
         print(f"Database connection error: {e}")
         raise
-
 
 @mcp.tool()
 def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -157,7 +190,6 @@ def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
             cursor.close()
         conn.close()
 
-
 def get_sensitive_fields() -> list:
     """
     从环境变量获取敏感字段列表
@@ -178,7 +210,6 @@ def get_sensitive_fields() -> list:
     env_fields = [field.strip().lower() for field in env_fields if field.strip()]
     
     return env_fields
-
 
 def is_safe_query(sql: str) -> bool:
     """
@@ -358,8 +389,6 @@ def query_data(sql: str) -> Dict[str, Any]:
             cursor.close()
         conn.close()
 
-
-@mcp.resource("mysql://tables")
 def get_tables() -> Dict[str, Any]:
     """Provide database table list"""
     conn = get_connection()
@@ -381,8 +410,6 @@ def get_tables() -> Dict[str, Any]:
             cursor.close()
         conn.close()
 
-
-@mcp.resource("mysql://table/{table_name}/describe")
 def get_table_description(table_name: str) -> Dict[str, Any]:
     """获取指定表的详细描述信息，以CREATE TABLE格式返回"""
     conn = get_connection()
@@ -470,6 +497,24 @@ def get_table_description(table_name: str) -> Dict[str, Any]:
             cursor.close()
         conn.close()
 
+@mcp.prompt()
+def generate_db_gpt_prompt() -> str:
+    """Generate a prompt for LLM to interact with database."""
+    # 获取数据库表列表
+    tables_info = get_tables()
+    database_name = tables_info["database"]
+    tables = tables_info["tables"]
+    
+    # 获取所有表的描述信息
+    table_definitions = []
+    for table in tables:
+        table_desc = get_table_description(table)
+        if table_desc.get("success"):
+            table_definitions.append(table_desc["table_definition"])
+    return DB_GPT_SYSTEM_PROMPT.format(
+                database_name=database_name,
+                table_definitions="\n".join(table_definitions),
+            )
 
 def validate_config():
     """Validate database configuration"""
@@ -479,7 +524,6 @@ def validate_config():
     if missing:
         logger.warning(f"Missing environment variables: {', '.join(missing)}")
         logger.warning("Using default values, which may not work in production.")
-
 
 def main():
     validate_config()
