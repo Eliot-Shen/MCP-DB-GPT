@@ -53,7 +53,7 @@ def get_query_logs(limit: str = "5") -> Dict[str, Any]:
     """获取查询日志
     
     Args:
-        limit: 可选参数，指定返回的日志数量，默认为20
+        limit: 可选参数，指定返回的日志数量，默认为5
     """
     limit = int(limit)
     # 验证limit参数
@@ -338,14 +338,14 @@ def is_sql_injection(query: str) -> bool:
 def query_data(sql: str) -> Dict[str, Any]:
     """Execute read-only SQL queries"""
     if not is_safe_query(sql):
-        error_msg = "Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
+        error_msg = f"sql: {sql}  Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
         log_query(operation=sql, success=False, error=error_msg)
         return {
             "success": False,
             "error": error_msg
         }
     if is_sql_injection(sql):
-        error_msg = "Potentially SQL injection detected!"
+        error_msg = f"sql: {sql}  Potentially SQL injection detected!"
         log_query(operation=sql, success=False, error=error_msg)
         return {
             "success": False,

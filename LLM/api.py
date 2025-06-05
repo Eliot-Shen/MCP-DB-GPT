@@ -16,7 +16,7 @@ class TongYiAPI:
             base_url=self.base_url
         )
 
-    def chat(self, prompt, content, max_token=1024, temperature=0.7, response_format="json_object"):
+    def chat(self, system_prompt, content, max_token=1024, temperature=0.7, response_format="json_object", conversation_history=None):
         """
         使用通义千问API进行对话，支持JSON格式输出
         :param prompt: 系统提示词
@@ -27,9 +27,13 @@ class TongYiAPI:
         :return: 模型响应内容
         """
         messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": content},
+            {"role": "system", "content": system_prompt},
         ]
+
+        if conversation_history:
+            messages.extend(conversation_history)
+        
+        messages.append({"role": "user", "content": content})
         
         params = {
             "model": self.model,
@@ -45,7 +49,7 @@ class TongYiAPI:
         response = self.client.chat.completions.create(**params)
         return response.choices[0].message.content
     
-    def chat_without_json(self, prompt, content, max_token=1024, temperature=0.7):
+    def chat_without_json(self, prompt, content, max_token=1024, temperature=0.7, conversation_history=None):
         """
         使用通义千问API进行对话，返回普通文本格式
         :param prompt: 系统提示词
@@ -54,7 +58,7 @@ class TongYiAPI:
         :param temperature: 温度参数，控制输出的随机性
         :return: 模型响应内容
         """
-        return self.chat(prompt, content, max_token, temperature, response_format=None)
+        return self.chat(prompt, content, max_token, temperature, response_format=None, conversation_history=conversation_history)
 
 if __name__ == "__main__":
     api = TongYiAPI()

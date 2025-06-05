@@ -1,14 +1,16 @@
+import json
+import uuid
 import asyncio
 from typing import Optional, List
 from contextlib import AsyncExitStack
-import json
 
 from LLM.api import TongYiAPI
+from LLM.few_shot_example import FEW_SHOT_EXAMPLES
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 load_dotenv()  # load environment variables from .env
 
 banner = r"""
@@ -34,6 +36,7 @@ def print_help():
     print("4. 自然语言查询 - 用中文描述你的需求（如：显示所有用户信息）")
     print("5. quit - 退出程序")
     print("6. help - 显示帮助信息")
+    print("7. new chat - 重置会话")
     print("\n注意：")
     print("- 使用'sql'命令时会直接执行SQL，不经过LLM处理，sql语句不用加;结尾")
     print("- 自然语言查询会通过LLM处理，返回结果包含SQL和查询结果")
@@ -44,6 +47,9 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.llm = TongYiAPI()
+        self.session_id = str(uuid.uuid4())
+        self.use_few_shot = True
+        self.conversation_history = FEW_SHOT_EXAMPLES if self.use_few_shot else []
 
     # methods will go here
     async def connect_to_server(self, server_script_path: str):
@@ -80,7 +86,7 @@ class MCPClient:
         if resources_response and resources_response.resources:
             print("Available resources:", [resource.uri for resource in resources_response.resources])
         else:
-            print("No available resources found.")
+            print("Available resources templates: ['logs://{limit}']")
         
         prompts = await self.session.list_prompts()
         if prompts and prompts.prompts:
@@ -167,8 +173,18 @@ class MCPClient:
         try:
             prompt = await self.session.get_prompt("generate_db_gpt_prompt")
             prompt = prompt.messages[0].content.text
-            llm_response = self.llm.chat(prompt, query, response_format="json_object")
+            llm_response = self.llm.chat(system_prompt=prompt, content=query, response_format="json_object", conversation_history=self.conversation_history)
             response_data = json.loads(llm_response)
+
+            self.conversation_history.append({
+                "role": "user",
+                "content": query
+            })
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": str(response_data)
+            })
+
             # 如果有直接响应，直接返回
             if response_data.get("direct_response"):
                 return response_data["direct_response"]
@@ -209,6 +225,12 @@ class MCPClient:
 
                 if query.lower() == 'help':
                     print_help()
+                    continue
+
+                if query.lower() == 'new chat':
+                    self.conversation_history = FEW_SHOT_EXAMPLES if self.use_few_shot else []
+                    self.session_id = str(uuid.uuid4())
+                    print("\n会话已重置")
                     continue
                 
                 # 处理直接SQL查询命令
