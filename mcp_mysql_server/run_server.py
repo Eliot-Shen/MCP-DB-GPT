@@ -34,26 +34,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mysql-mcp-server")
 
-def log_query(operation: str, success: bool, error: str = None):
+def log_query(operation: str, success: bool, error: str = None, session_id: str = "anonymous"):
     """
-    记录查询日志（不区分客户端）
+    记录查询日志（区分客户端会话）
     """
     log_entry = {
         "timestamp": time.time(),
         "operation": operation,
         "success": success,
-        "error_msg": error
+        "error_msg": error,
+        "session_id": session_id
     }
     
     # 添加到全局日志列表
     query_logs.append(log_entry)
 
-@mcp.resource("logs://{limit}")
-def get_query_logs(limit: str = "5") -> Dict[str, Any]:
+@mcp.resource("logs://{session_id}/{limit}")
+def get_query_logs(limit: str = "5", session_id: str = "anonymous") -> Dict[str, Any]:
     """获取查询日志
     
     Args:
         limit: 可选参数，指定返回的日志数量，默认为5
+        session_id: 可选参数，指定要获取的会话ID
     """
     limit = int(limit)
     # 验证limit参数
@@ -63,8 +65,11 @@ def get_query_logs(limit: str = "5") -> Dict[str, Any]:
             "error": "Limit must be a positive integer"
         }
     
-    # 获取最近的日志
-    logs = query_logs[-limit:] if limit < len(query_logs) else query_logs
+    # 获取日志（按session_id过滤）
+    logs = [log for log in query_logs if log.get("session_id") == session_id]
+    
+    # 限制返回数量
+    logs = logs[-limit:] if limit < len(logs) else logs
     
     # 转换时间戳为可读格式
     formatted_logs = []
@@ -77,7 +82,7 @@ def get_query_logs(limit: str = "5") -> Dict[str, Any]:
     return {
         "success": True,
         "logs": formatted_logs,
-        "total_queries": len(query_logs)
+        "total_queries": len(logs)
     }
 
 # @mcp.tool()
@@ -120,7 +125,7 @@ def get_connection():
         raise
 
 @mcp.tool()
-def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
+def get_schema(table_names: Optional[List[str]] = None, session_id: str = "anonymous") -> Dict[str, Any]:
     """获取数据库表结构信息，支持按表名过滤
     
     Args:
@@ -170,7 +175,7 @@ def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
             schema[table_name] = table_schema
 
         # 记录成功日志
-        log_query(operation=f"get_schema for tables: {table_names_to_query}", success=True)
+        log_query(operation=f"get_schema for tables: {table_names_to_query}", success=True, session_id=session_id)
 
         return {
             "success": True,
@@ -179,7 +184,7 @@ def get_schema(table_names: Optional[List[str]] = None) -> Dict[str, Any]:
         }
     except Exception as e:
         # 记录失败日志
-        log_query(operation="get_schema", success=False, error=str(e))
+        log_query(operation="get_schema", success=False, error=str(e), session_id=session_id)
         logger.error(f"Failed to retrieve schema: {str(e)}")
         return {
             "success": False,
@@ -335,18 +340,18 @@ def is_sql_injection(query: str) -> bool:
     return False
 
 @mcp.tool()
-def query_data(sql: str) -> Dict[str, Any]:
+def query_data(sql: str, session_id: str = "anonymous") -> Dict[str, Any]:
     """Execute read-only SQL queries"""
     if not is_safe_query(sql):
         error_msg = f"sql: {sql}  Potentially unsafe query detected. Only SELECT queries are allowed. No sensitive fields like password/salary/etc."
-        log_query(operation=sql, success=False, error=error_msg)
+        log_query(operation=sql, success=False, error=error_msg, session_id=session_id)
         return {
             "success": False,
             "error": error_msg
         }
     if is_sql_injection(sql):
         error_msg = f"sql: {sql}  Potentially SQL injection detected!"
-        log_query(operation=sql, success=False, error=error_msg)
+        log_query(operation=sql, success=False, error=error_msg, session_id=session_id)
         return {
             "success": False,
             "error": error_msg
@@ -368,7 +373,7 @@ def query_data(sql: str) -> Dict[str, Any]:
             conn.commit()
 
             # 记录成功查询
-            log_query(operation=sql, success=True)
+            log_query(operation=sql, success=True, session_id=session_id)
             
             # Convert results to serializable format
             return {
@@ -379,7 +384,7 @@ def query_data(sql: str) -> Dict[str, Any]:
         except Exception as e:
             conn.rollback()
             error_msg = str(e)
-            log_query(operation=sql, success=False, error=error_msg)
+            log_query(operation=sql, success=False, error=error_msg, session_id=session_id)
             return {
                 "success": False,
                 "error": str(e)

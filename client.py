@@ -75,6 +75,7 @@ class MCPClient:
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
 
         await self.session.initialize()
+        print(f"Session_id: {self.session_id}")
 
         # List available tools
         response = await self.session.list_tools()
@@ -86,7 +87,7 @@ class MCPClient:
         if resources_response and resources_response.resources:
             print("Available resources:", [resource.uri for resource in resources_response.resources])
         else:
-            print("Available resources templates: ['logs://{limit}']")
+            print("Available resources templates: ['logs']")
         
         prompts = await self.session.list_prompts()
         if prompts and prompts.prompts:
@@ -98,7 +99,7 @@ class MCPClient:
         """获取查询日志"""
         try:
             # logs_response = await self.session.call_tool("get_query_logs", {"limit": limit})
-            logs_response = await self.session.read_resource(f"logs://{limit}")
+            logs_response = await self.session.read_resource(f"logs://{self.session_id}/{limit}")
             
             if not logs_response or not logs_response.contents:
                 return "无法获取查询日志"
@@ -131,9 +132,10 @@ class MCPClient:
         """获取数据库结构信息"""
         try:
             params = {}
+            params["session_id"] = self.session_id
             if table_names:
                 params["table_names"] = table_names
-                
+
             schema_response = await self.session.call_tool("get_schema", params)
             if not schema_response or not schema_response.content:
                 return "无法获取数据库结构信息"
@@ -193,7 +195,8 @@ class MCPClient:
             if response_data.get("sql"):
                 # 执行SQL查询
                 query_result = await self.session.call_tool("query_data", {
-                    "sql": response_data["sql"]
+                    "sql": response_data["sql"],
+                    "session_id": self.session_id
                 })
                 # print(query_result)
                 # 构建最终响应
@@ -244,7 +247,8 @@ class MCPClient:
                     try:
                         # 直接调用query_data工具执行SQL
                         query_result = await self.session.call_tool("query_data", {
-                            "sql": sql
+                            "sql": sql,
+                            "session_id": self.session_id
                         })
                         
                         if query_result and query_result.content:
