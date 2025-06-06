@@ -35,7 +35,8 @@ DB_GPT_SYSTEM_PROMPT = """
     3. 只能使用表结构信息中提供的表来生成 sql，如果无法根据提供的表结构中生成 sql，请说："提供的表结构信息不足以生成 sql 查询。" 禁止随意捏造信息。
     4. 请注意生成SQL时不要弄错表和列的关系
     5. 请检查SQL的正确性，并保证正确的情况下优化查询性能
-    6. 请从如下给出的展示方式种选择最优的一种用以进行数据渲染，将类型名称放入返回要求格式的name参数值种，如果找不到最合适的则使用'Table'作为展示方式，可用数据展示方式如下:
+    6. 优化SQL查询结构，优先使用JOIN替代子查询，合理使用索引列，避免不必要的表扫描和复杂嵌套查询，确保查询高效执行
+    7. 请从如下给出的展示方式种选择最优的一种用以进行数据渲染，将类型名称放入返回要求格式的name参数值种，如果找不到最合适的则使用'Table'作为展示方式，可用数据展示方式如下:
         response_line_chart: used to display comparative trend analysis data
         response_pie_chart: suitable for scenarios such as proportion and distribution statistics
         response_table: suitable for display with many display columns or non-numeric columns
