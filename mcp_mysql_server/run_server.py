@@ -26,6 +26,7 @@ DB_CONFIG = {
 }
 
 # Global query log storage
+QUERY_LOGS_FILE_PATH = "query_logs.json"
 query_logs = []  # List of all query logs
 
 logging.basicConfig(
@@ -33,6 +34,36 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("mysql-mcp-server")
+
+def load_query_logs_from_json(file_path: str):
+    """
+    从 JSON 文件中加载查询日志
+    :param file_path: 要加载的文件路径
+    """
+    global query_logs
+    try:
+        with open(file_path, 'r', encoding='utf-8') as json_file:
+            query_logs = json.load(json_file)
+        logger.info(f"Query logs loaded from {file_path}")
+    except FileNotFoundError:
+        logger.warning(f"No existing query logs found at {file_path}. Starting with an empty log.")
+    except Exception as e:
+        logger.error(f"Failed to load query logs from {file_path}: {e}")
+load_query_logs_from_json(QUERY_LOGS_FILE_PATH)
+
+
+def save_query_logs_to_json(file_path: str):
+    """
+    将查询日志保存到 JSON 文件中
+    :param file_path: 要保存的文件路径
+    """
+    try:
+        # 将日志列表序列化为 JSON 格式
+        with open(file_path, 'w', encoding='utf-8') as json_file:
+            json.dump(query_logs, json_file, ensure_ascii=False, indent=4)
+        logger.info(f"Query logs saved to {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to save query logs to {file_path}: {e}")
 
 def log_query(operation: str, success: bool, error: str = None, session_id: str = "anonymous"):
     """
@@ -48,6 +79,7 @@ def log_query(operation: str, success: bool, error: str = None, session_id: str 
     
     # 添加到全局日志列表
     query_logs.append(log_entry)
+    save_query_logs_to_json(QUERY_LOGS_FILE_PATH)
 
 @mcp.resource("logs://{session_id}/{limit}")
 def get_query_logs(limit: str = "5", session_id: str = "anonymous") -> Dict[str, Any]:
@@ -84,37 +116,6 @@ def get_query_logs(limit: str = "5", session_id: str = "anonymous") -> Dict[str,
         "logs": formatted_logs,
         "total_queries": len(logs)
     }
-
-# @mcp.tool()
-# def get_query_logs(limit: int = 5) -> Dict[str, Any]:
-#     """获取查询日志
-    
-#     Args:
-#         limit: 可选参数，指定返回的日志数量，默认为20
-#     """
-#     # 验证limit参数
-#     if limit <= 0:
-#         return {
-#             "success": False,
-#             "error": "Limit must be a positive integer"
-#         }
-    
-#     # 获取最近的日志
-#     logs = query_logs[-limit:] if limit < len(query_logs) else query_logs
-    
-#     # 转换时间戳为可读格式
-#     formatted_logs = []
-#     for log in logs:
-#         formatted_log = log.copy()
-#         formatted_log["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S", 
-#                               time.localtime(log["timestamp"]))
-#         formatted_logs.append(formatted_log)
-    
-#     return {
-#         "success": True,
-#         "logs": formatted_logs,
-#         "total_queries": len(query_logs)
-#     }
 
 # Connect to MySQL database
 def get_connection():

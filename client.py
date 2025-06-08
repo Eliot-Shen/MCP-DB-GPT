@@ -1,6 +1,7 @@
 import json
 import uuid
 import asyncio
+asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from typing import Optional, List
 from contextlib import AsyncExitStack
 
@@ -51,6 +52,9 @@ class MCPClient:
         self.use_few_shot = True
         self.conversation_history = FEW_SHOT_EXAMPLES if self.use_few_shot else []
 
+    async def set_session_id(self, session_id: str):
+        self.session_id = session_id
+
     # methods will go here
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -58,6 +62,7 @@ class MCPClient:
         Args:
             server_script_path: Path to the server script (.py or .js)
         """
+        # try:
         is_python = server_script_path.endswith('.py')
         is_js = server_script_path.endswith('.js')
         if not (is_python or is_js):
@@ -69,11 +74,9 @@ class MCPClient:
             args=[server_script_path],
             env=None
         )
-
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         self.stdio, self.write = stdio_transport
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
-
         await self.session.initialize()
         print(f"Session_id: {self.session_id}")
 
@@ -94,6 +97,11 @@ class MCPClient:
             print("Available prompts:", [prompt.name for prompt in prompts.prompts])
         else:
             print("No available prompts found.")
+        # except Exception as e:
+        #     import traceback
+        #     traceback.print_exc()
+        #     print(f"Error: {str(e)}")
+        #     raise
 
     async def get_query_logs(self, limit: int = 5) -> str:
         """获取查询日志"""
@@ -232,7 +240,7 @@ class MCPClient:
 
                 if query.lower() == 'new chat':
                     self.conversation_history = FEW_SHOT_EXAMPLES if self.use_few_shot else []
-                    self.session_id = str(uuid.uuid4())
+                    await self.set_session_id(str(uuid.uuid4()))
                     print("\n会话已重置")
                     continue
                 
