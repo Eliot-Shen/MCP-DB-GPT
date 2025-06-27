@@ -136,7 +136,7 @@ def nlp_query_sync(server_script_path: str, user_query: str, agent_conversation_
 # 帮助文本
 HELP_TEXT = """
 **使用说明**  
-- `schema [表名1 表名2 ...]`：获取数据库结构（可指定表名，默认返回所有表结构）。  
+- `schema 表名1 表名2`：获取数据库结构（可指定表名，默认返回所有表结构）。  
 - `sql <SQL语句>`：直接执行 SQL 查询（例如 `sql SELECT * FROM users`）。  
 - `log [数量]`：显示最近的查询日志（默认 5 条，可以 `log 10`）。  
 - 自然语言查询（中文），如“显示所有用户信息”（会由 LLM 生成 SQL 并返回结果）。  
