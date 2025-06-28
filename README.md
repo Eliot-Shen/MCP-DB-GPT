@@ -22,7 +22,7 @@ A terminal‑based client for querying MySQL databases using natural language, i
 
 ## 🚀 Quick Start
 
-### 1. Clone the repo into a local folder.
+### 1. Clone the repo into a local folder
 
 ```bash
 git clone https://github.com/Eliot-Shen/MCP-DB-GPT.git
@@ -30,7 +30,7 @@ cd MCP-DB-GPT
 
 ```
 
-### 2. Install packages.
+### 2. Install packages
 
 ```bash
 uv venv  # 会在项目根目录生成 .venv 虚拟环境
@@ -40,13 +40,34 @@ source .venv/bin/activate  # Linux/macOS
 uv sync
 ```
 
-### 3. Run CLI.
+### 3. Modify Environment Variables
+
+Create an .env file and modify the environment variables. Example: .env.example is as follows.
+
+```markdown
+# MYSQL Configurations
+
+DB_HOST=localhost  
+DB_USER=root
+DB_PASSWORD="123456"
+DB_NAME="college"
+DB_PORT=3306
+SENSITIVE_FIELDS="password;salary;pin"
+
+# Model Configurations
+
+model_name = "qwen-plus"
+api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key = "xxx"
+```
+
+### 4. Run CLI
 
 ```bash
 python client.py .\mcp_mysql_server\run_server.py
 ```
 
-### 4. Run UI.
+### 5. Run UI
 
 ```bash
 streamlit run app.py
